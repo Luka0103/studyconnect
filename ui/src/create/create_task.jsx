@@ -11,14 +11,55 @@ export default function CreateTask({ userId, onCancel, onAddTask }) {
   const [notes, setNotes] = useState("");
   const [progress, setProgress] = useState(0);
   const [groups, setGroups] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  async function fetchWithToken(url, options = {}) {
+    const token = localStorage.getItem("access_token");
+    const refreshToken = localStorage.getItem("refresh_token");
+
+    const res = await fetch(url, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        ...(options.headers || {}),
+      },
+    });
+
+    if (res.status !== 401) return res;
+
+    if (!refreshToken) throw new Error("Session expired. Please log in again.");
+
+    const refreshRes = await fetch("http://localhost:5000/api/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    const data = await refreshRes.json();
+    if (!refreshRes.ok) throw new Error(data.error || "Failed to refresh token");
+
+    localStorage.setItem("access_token", data.access_token);
+    if (data.refresh_token) localStorage.setItem("refresh_token", data.refresh_token);
+
+    return await fetch(url, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${data.access_token}`,
+        ...(options.headers || {}),
+      },
+    });
+  }
 
   useEffect(() => {
-    // Fetch groups for "group task" selection
     async function fetchGroups() {
       try {
-        const res = await fetch(`http://localhost:5000/api/groups/user/admin/${userId}`);
+        const res = await fetchWithToken(
+          `http://localhost:5000/api/groups/user/admin/${userId}`
+        );
         const data = await res.json();
-        if (res.ok) setGroups(data.filter(g => g.role)); // only admin groups
+        if (res.ok) setGroups(data.filter((g) => g.role));
       } catch (err) {
         console.error("Failed to fetch groups:", err);
       }
@@ -43,7 +84,7 @@ export default function CreateTask({ userId, onCancel, onAddTask }) {
       user_id: userId,
     };
 
-    // Pass task object to parent (App2) without calling API here
+    // Pass task object to parent (App2.jsx)
     if (onAddTask) onAddTask(task);
 
     // Reset form
@@ -141,10 +182,10 @@ export default function CreateTask({ userId, onCancel, onAddTask }) {
 
         {/* Buttons */}
         <div className="form-buttons mt-4 flex gap-2">
-          <button type="submit" className="btn-primary flex-1" disabled={!isValid}>
+          <button type="submit" className="btn-primary flex-1" disabled={!isValid || loading}>
             Create Task
           </button>
-          <button type="button" onClick={onCancel} className="btn-cancel flex-1">Cancel</button>
+          <button type="button" onClick={onCancel} className="btn-cancel flex-1" disabled={loading}>Cancel</button>
         </div>
       </form>
     </div>
