@@ -345,10 +345,22 @@ def get_tasks_for_specific_user(user_id):
             else:
                 return jsonify({"error": "User not found"}), 404
 
-        tasks = get_tasks_for_user(user.id)
-        return jsonify([task_to_dict(t) for t in tasks]), 200
+        # 1. Get personal tasks
+        personal_tasks = get_tasks_for_user(user.id)
+
+        # 2. Get tasks from groups where user is a member
+        group_tasks = []
+        groups = get_groups_for_user(user.id)
+        for g in groups:
+            for task in g.tasks:  # Assuming `Group` has a `tasks` relationship
+                group_tasks.append(task)
+
+        # Merge
+        all_tasks = personal_tasks + group_tasks
+        return jsonify([task_to_dict(t) for t in all_tasks]), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 # Groups
 @app.route("/api/groups", methods=["GET"])
@@ -376,6 +388,37 @@ def get_groups_for_specific_user(user_id):
 
         groups = get_groups_for_user(user.id)
         groups_serialized = [group_to_dict(g, user.id) for g in groups]
+
+        return jsonify(groups_serialized), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
+@app.route("/api/groups/user/admin/<string:user_id>", methods=["GET"])
+@keycloak_protect
+def get_groups_for_specific_admin_user(user_id):
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            auth_header = request.headers.get("Authorization")
+            token = auth_header.split()[1]
+            kc_userinfo = keycloak_openid.userinfo(token)
+            if kc_userinfo.get("sub") == user_id:
+                user = get_or_create_user_from_keycloak(kc_userinfo)
+            else:
+                return jsonify({"error": "User not found"}), 404
+
+        # Fetch all groups the user belongs to
+        all_groups = get_groups_for_user(user.id)
+
+        # Only include groups where the user is admin
+        admin_groups = []
+        for g in all_groups:
+            membership = next((m for m in g.group_memberships if m.user_id == user.id), None)
+            if membership and membership.role == "admin":
+                admin_groups.append(g)
+
+        # Serialize
+        groups_serialized = [group_to_dict(g, user.id) for g in admin_groups]
 
         return jsonify(groups_serialized), 200
     except Exception as e:

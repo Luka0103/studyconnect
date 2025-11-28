@@ -60,7 +60,7 @@ export default function CreateTask({ userId, onCancel, onAddTask }) {
   useEffect(() => {
     async function fetchGroups() {
       try {
-        const res = await fetchWithToken(`http://localhost:5000/api/groups/user/${userId}`);
+        const res = await fetchWithToken(`http://localhost:5000/api/groups/user/admin/${userId}`);
         const data = await res.json();
         if (res.ok) {
           // Only include groups where user has a role

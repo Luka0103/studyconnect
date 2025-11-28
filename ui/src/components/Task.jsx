@@ -18,25 +18,21 @@ export default function EditTaskModal({ task, onSave, onCancel, userId, fetchWit
   // =============================
   useEffect(() => {
     async function fetchGroups() {
-      if (!userId || !fetchWithToken) return;
-      setLoadingGroups(true);
       try {
         const res = await fetchWithToken(`http://localhost:5000/api/groups/user/${userId}`);
         const data = await res.json();
         if (res.ok) {
-          setGroups(data.filter(g => g.role)); // only groups with a role
+          // Only include groups where user has a role
+          setGroups(data.filter(g => g.role));
         } else {
           console.warn("Failed to load groups:", data.error);
         }
       } catch (err) {
         console.error("Failed to fetch groups:", err);
-      } finally {
-        setLoadingGroups(false);
       }
     }
-
-    fetchGroups();
-  }, [userId, fetchWithToken]);
+    if (userId) fetchGroups();
+  }, [userId]);
 
   // =============================
   // Populate fields when task loads
