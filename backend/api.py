@@ -334,33 +334,8 @@ def get_tasks():
 @app.route("/api/tasks/user/<string:user_id>", methods=["GET"])
 @keycloak_protect
 def get_tasks_for_specific_user(user_id):
-    try:
-        user = User.query.get(user_id)
-        if not user:
-            auth_header = request.headers.get("Authorization")
-            token = auth_header.split()[1]
-            kc_userinfo = keycloak_openid.userinfo(token)
-            if kc_userinfo.get("sub") == user_id:
-                user = get_or_create_user_from_keycloak(kc_userinfo)
-            else:
-                return jsonify({"error": "User not found"}), 404
-
-        # 1. Get personal tasks
-        personal_tasks = get_tasks_for_user(user.id)
-
-        # 2. Get tasks from groups where user is a member
-        group_tasks = []
-        groups = get_groups_for_user(user.id)
-        for g in groups:
-            for task in g.tasks:  # Assuming `Group` has a `tasks` relationship
-                group_tasks.append(task)
-
-        # Merge
-        all_tasks = personal_tasks + group_tasks
-        return jsonify([task_to_dict(t) for t in all_tasks]), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
+    tasks = get_tasks_for_user(user_id)
+    return jsonify([task_to_dict(t) for t in tasks]), 200
 
 # Groups
 @app.route("/api/groups", methods=["GET"])

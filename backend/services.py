@@ -66,10 +66,9 @@ def create_task_service(data):
     user_id = data.get("user_id")
     group_id = data.get("group_id")
 
-    # Restrict: only admins can create group tasks
-    if group_id:
-        if not is_group_admin(user_id, group_id):
-            raise Exception("Only admins can create tasks for this group")
+    # Only admins can create group tasks
+    if group_id and not is_group_admin(user_id, group_id):
+        raise Exception("Only admins can create tasks for this group")
 
     task = Task(
         title=data["title"],
@@ -88,40 +87,29 @@ def create_task_service(data):
     return task
 
 
-
 def update_task_service(task_id, data, current_user_id):
     task = Task.query.get(task_id)
     if not task:
         raise Exception("Task not found")
 
-    # Restrict: only admins can update group tasks
-    if task.group_id:
-        if not is_group_admin(current_user_id, task.group_id):
-            raise Exception("Only admins can update tasks for this group")
-
-    # # Status validation
-    # if "status" in data:
-    #     curr = task.status
-    #     new = data["status"]
-    #     if new not in VALID_STATUSES.get(curr, []):
-    #         raise ValueError("Invalid status transition")
-
-    if "progress" in data and not (0 <= data["progress"] <= 100):
-        raise ValueError("Progress must be 0–100")
-
-    if "priority" in data and data["priority"] not in VALID_PRIORITIES:
-        raise ValueError("Invalid priority")
-
-    # Update allowed fields
-    for field in ["title", "kind", "priority", "status", "notes", "assignee", "progress"]:
-        if field in data:
-            setattr(task, field, data[field])
+    if task.group_id and not is_group_admin(current_user_id, task.group_id):
+        raise Exception("Only admins can update tasks for this group")
 
     if "deadline" in data:
         deadline_date = datetime.strptime(data["deadline"], "%Y-%m-%d").date()
         if deadline_date < date.today():
             raise ValueError("Deadline cannot be in the past")
         task.deadline = deadline_date
+
+    if "priority" in data and data["priority"] not in VALID_PRIORITIES:
+        raise ValueError("Invalid priority")
+
+    if "progress" in data and not (0 <= data["progress"] <= 100):
+        raise ValueError("Progress must be 0–100")
+
+    for field in ["title", "kind", "priority", "status", "notes", "assignee", "progress"]:
+        if field in data:
+            setattr(task, field, data[field])
 
     if "group_id" in data:
         task.group_id = data["group_id"]
@@ -130,16 +118,23 @@ def update_task_service(task_id, data, current_user_id):
     return task
 
 
+
 def get_tasks_for_user(user_id):
     user = User.query.get(user_id)
     if not user:
         return []
 
     group_ids = [gm.group_id for gm in user.group_memberships]
-    return Task.query.filter(
-        (Task.user_id == user_id) |
-        (Task.group_id.in_(group_ids))
+
+    # Query tasks assigned to the user or belonging to user's groups
+    tasks = Task.query.filter(
+        (Task.user_id == user_id) | (Task.group_id.in_(group_ids))
     ).all()
+
+    # Remove duplicates by task ID
+    unique_tasks = {task.id: task for task in tasks}.values()
+    return list(unique_tasks)
+
 
 
 # -----------------------------
