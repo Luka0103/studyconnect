@@ -6,10 +6,10 @@ from random import choice
 
 VALID_PRIORITIES = ['low', 'medium', 'high']
 VALID_STATUSES = {
-    'todo': ['in_progress'],
-    'in_progress': ['done', 'blocked'],
-    'blocked': ['in_progress'],
-    'done': []
+    "todo": ["inProgress", "done", "expired"],
+    "inProgress": ["todo", "done", "expired"],
+    "done": ["todo", "inProgress", "expired"],
+    "expired": ["todo", "inProgress", "done"],
 }
 
 # -----------------------------
@@ -89,22 +89,22 @@ def create_task_service(data):
 
 
 
-def update_task_service(task_id, data):
+def update_task_service(task_id, data, current_user_id):
     task = Task.query.get(task_id)
     if not task:
         raise Exception("Task not found")
 
     # Restrict: only admins can update group tasks
     if task.group_id:
-        if not is_group_admin(data["user_id"], task.group_id):
+        if not is_group_admin(current_user_id, task.group_id):
             raise Exception("Only admins can update tasks for this group")
 
-    # Status validation
-    if "status" in data:
-        curr = task.status
-        new = data["status"]
-        if new not in VALID_STATUSES.get(curr, []):
-            raise ValueError("Invalid status transition")
+    # # Status validation
+    # if "status" in data:
+    #     curr = task.status
+    #     new = data["status"]
+    #     if new not in VALID_STATUSES.get(curr, []):
+    #         raise ValueError("Invalid status transition")
 
     if "progress" in data and not (0 <= data["progress"] <= 100):
         raise ValueError("Progress must be 0–100")

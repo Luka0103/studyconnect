@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 
-export default function EditTaskModal({ task, onSave, onCancel, userId }) {
+export default function EditTaskModal({ task, onSave, onCancel, userId, fetchWithToken }) {
   const [title, setTitle] = useState("");
   const [deadline, setDeadline] = useState("");
   const [kind, setKind] = useState("");
@@ -11,69 +11,32 @@ export default function EditTaskModal({ task, onSave, onCancel, userId }) {
   const [notes, setNotes] = useState("");
   const [progress, setProgress] = useState(0);
   const [groups, setGroups] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  // =============================
-  // Authenticated fetch helper
-  // =============================
-  async function fetchWithToken(url, options = {}) {
-    const token = localStorage.getItem("access_token");
-    const refreshToken = localStorage.getItem("refresh_token");
-
-    const res = await fetch(url, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-        ...(options.headers || {}),
-      },
-    });
-
-    if (res.status !== 401) return res;
-
-    if (!refreshToken) throw new Error("Session expired. Please log in again.");
-
-    const refreshRes = await fetch("http://localhost:5000/api/refresh", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-
-    const data = await refreshRes.json();
-    if (!refreshRes.ok) throw new Error(data.error || "Failed to refresh token");
-
-    localStorage.setItem("access_token", data.access_token);
-    if (data.refresh_token) localStorage.setItem("refresh_token", data.refresh_token);
-
-    return await fetch(url, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${data.access_token}`,
-        ...(options.headers || {}),
-      },
-    });
-  }
+  const [loadingGroups, setLoadingGroups] = useState(false);
 
   // =============================
   // Fetch user's groups
   // =============================
   useEffect(() => {
     async function fetchGroups() {
+      if (!userId || !fetchWithToken) return;
+      setLoadingGroups(true);
       try {
         const res = await fetchWithToken(`http://localhost:5000/api/groups/user/${userId}`);
         const data = await res.json();
         if (res.ok) {
-          setGroups(data.filter(g => g.role)); // only include groups with a role
+          setGroups(data.filter(g => g.role)); // only groups with a role
         } else {
           console.warn("Failed to load groups:", data.error);
         }
       } catch (err) {
         console.error("Failed to fetch groups:", err);
+      } finally {
+        setLoadingGroups(false);
       }
     }
-    if (userId) fetchGroups();
-  }, [userId]);
+
+    fetchGroups();
+  }, [userId, fetchWithToken]);
 
   // =============================
   // Populate fields when task loads
@@ -93,38 +56,22 @@ export default function EditTaskModal({ task, onSave, onCancel, userId }) {
   }, [task]);
 
   // =============================
-  // Handle save
+  // Handle save (parent does API)
   // =============================
-  const handleSave = async () => {
+  const handleSave = () => {
     const updatedTask = {
+      ...task,
       title,
       deadline,
       kind,
       priority,
-      status: task.status,
-      user_id: task.user_id,
       group: taskType === "group" ? selectedGroup : null,
       assignee: assignee || null,
       notes: notes || null,
       progress,
     };
 
-    setLoading(true);
-    try {
-      const res = await fetchWithToken(`http://localhost:5000/api/tasks/${task.id}`, {
-        method: "PUT",
-        body: JSON.stringify(updatedTask),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to update task");
-
-      onSave(data.task);
-    } catch (err) {
-      alert("Error updating task: " + err.message);
-    } finally {
-      setLoading(false);
-    }
+    onSave(updatedTask); // parent handles API
   };
 
   const isValid =
@@ -136,9 +83,6 @@ export default function EditTaskModal({ task, onSave, onCancel, userId }) {
 
   if (!task) return null;
 
-  // =============================
-  // Render
-  // =============================
   return (
     <div className="modal-overlay">
       <div className="modal-content max-w-md w-full p-4">
@@ -224,18 +168,22 @@ export default function EditTaskModal({ task, onSave, onCancel, userId }) {
               <label className="block mb-1 font-medium">
                 Select Group <span style={{ color: "red" }}>*</span>
               </label>
-              <select
-                value={selectedGroup}
-                onChange={(e) => setSelectedGroup(e.target.value)}
-                className="w-full p-2 border rounded-md"
-              >
-                <option value="">-- Choose a Group --</option>
-                {groups.map((group) => (
-                  <option key={group.id} value={group.id}>
-                    {group.name}
-                  </option>
-                ))}
-              </select>
+              {loadingGroups ? (
+                <div>Loading groups...</div>
+              ) : (
+                <select
+                  value={selectedGroup}
+                  onChange={(e) => setSelectedGroup(e.target.value)}
+                  className="w-full p-2 border rounded-md"
+                >
+                  <option value="">-- Choose a Group --</option>
+                  {groups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
           )}
 
@@ -273,8 +221,8 @@ export default function EditTaskModal({ task, onSave, onCancel, userId }) {
 
           {/* Buttons */}
           <div className="flex gap-2 mt-4">
-            <button className="btn-primary flex-1" onClick={handleSave} disabled={!isValid || loading}>
-              {loading ? "Saving..." : "Save"}
+            <button className="btn-primary flex-1" onClick={handleSave} disabled={!isValid}>
+              Save
             </button>
             <button className="btn-cancel flex-1" onClick={onCancel}>
               Cancel

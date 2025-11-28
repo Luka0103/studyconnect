@@ -411,12 +411,10 @@ def get_group_members(group_id):
 @keycloak_protect
 def update_task(task_id):
     data = request.json
+    kc_user = get_or_create_user_from_keycloak(request.user)
     try:
-        updated_task = update_task_service(task_id, data)
-        return jsonify({
-            "message": "Task updated",
-            "task": task_to_dict(updated_task)
-        }), 200
+        updated_task = update_task_service(task_id, data, kc_user.id)
+        return jsonify({"message": "Task updated", "task": task_to_dict(updated_task)}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
