@@ -9,12 +9,10 @@ export default function CreateTask({ userId, onCancel, onAddTask }) {
   const [selectedGroup, setSelectedGroup] = useState("");
   const [assignee, setAssignee] = useState("");
   const [notes, setNotes] = useState("");
+  const [progress, setProgress] = useState(0);
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // =============================
-  // Helper: Authenticated fetch
-  // =============================
   async function fetchWithToken(url, options = {}) {
     const token = localStorage.getItem("access_token");
     const refreshToken = localStorage.getItem("refresh_token");
@@ -30,7 +28,6 @@ export default function CreateTask({ userId, onCancel, onAddTask }) {
 
     if (res.status !== 401) return res;
 
-    // Attempt to refresh token if expired
     if (!refreshToken) throw new Error("Session expired. Please log in again.");
 
     const refreshRes = await fetch("http://localhost:5000/api/refresh", {
@@ -42,11 +39,9 @@ export default function CreateTask({ userId, onCancel, onAddTask }) {
     const data = await refreshRes.json();
     if (!refreshRes.ok) throw new Error(data.error || "Failed to refresh token");
 
-    // Store new tokens (Keycloak rotates refresh tokens)
     localStorage.setItem("access_token", data.access_token);
     if (data.refresh_token) localStorage.setItem("refresh_token", data.refresh_token);
 
-    // Retry request with new access token
     return await fetch(url, {
       ...options,
       headers: {
@@ -57,19 +52,14 @@ export default function CreateTask({ userId, onCancel, onAddTask }) {
     });
   }
 
-  // =============================
-  // Fetch user's groups
-  // =============================
   useEffect(() => {
     async function fetchGroups() {
       try {
-        const res = await fetchWithToken(`http://localhost:5000/api/groups/user/${userId}`);
+        const res = await fetchWithToken(
+          `http://localhost:5000/api/groups/user/admin/${userId}`
+        );
         const data = await res.json();
-        if (res.ok) {
-          setGroups(data.map((g) => g.name));
-        } else {
-          console.warn("Failed to load groups:", data.error);
-        }
+        if (res.ok) setGroups(data.filter((g) => g.role));
       } catch (err) {
         console.error("Failed to fetch groups:", err);
       }
@@ -77,10 +67,7 @@ export default function CreateTask({ userId, onCancel, onAddTask }) {
     if (userId) fetchGroups();
   }, [userId]);
 
-  // =============================
-  // Handle Create Task
-  // =============================
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
 
     const task = {
@@ -89,92 +76,52 @@ export default function CreateTask({ userId, onCancel, onAddTask }) {
       kind,
       priority,
       task_type: taskType,
-      group: taskType === "group" ? selectedGroup : null,
+      group_id: taskType === "group" ? selectedGroup : null,
       assignee: assignee || null,
       notes: notes || null,
+      progress,
       status: "todo",
       user_id: userId,
     };
 
-    setLoading(true);
-    try {
-      const res = await fetchWithToken("http://localhost:5000/api/tasks", {
-        method: "POST",
-        body: JSON.stringify(task),
-      });
+    // Pass task object to parent (App2.jsx)
+    if (onAddTask) onAddTask(task);
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to create task");
-
-      // Update Kanban board
-      if (onAddTask) onAddTask({ ...task, id: data.task.id });
-
-      // Reset form
-      setTitle("");
-      setDeadline("");
-      setKind("");
-      setPriority("");
-      setTaskType("my");
-      setSelectedGroup("");
-      setAssignee("");
-      setNotes("");
-
-      onCancel(); // close modal
-    } catch (err) {
-      console.error("Error creating task:", err);
-      alert("Error creating task: " + err.message);
-    } finally {
-      setLoading(false);
-    }
+    // Reset form
+    setTitle(""); setDeadline(""); setKind(""); setPriority("");
+    setTaskType("my"); setSelectedGroup(""); setAssignee(""); setNotes(""); setProgress(0);
+    onCancel();
   };
 
-  // =============================
-  // Render
-  // =============================
+  const isValid =
+    title.trim() &&
+    deadline &&
+    kind &&
+    priority &&
+    (taskType === "my" || (taskType === "group" && selectedGroup));
+
   return (
     <div className="card">
       <h2 className="text-xl font-semibold mb-4 text-center">Create New Task</h2>
-
       <form className="space-y-4" onSubmit={handleSubmit}>
         {/* Title */}
         <div>
-          <label className="block mb-1 font-medium">
-            Title <span style={{ color: "red" }}>*</span>
-          </label>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            required
-            className="w-full p-2 border rounded-md"
-          />
+          <label className="block mb-1 font-medium">Title *</label>
+          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)}
+                 required className="w-full p-2 border rounded-md"/>
         </div>
 
         {/* Deadline */}
         <div>
-          <label className="block mb-1 font-medium">
-            Deadline <span style={{ color: "red" }}>*</span>
-          </label>
-          <input
-            type="date"
-            value={deadline}
-            onChange={(e) => setDeadline(e.target.value)}
-            required
-            className="w-full p-2 border rounded-md"
-          />
+          <label className="block mb-1 font-medium">Deadline *</label>
+          <input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)}
+                 required className="w-full p-2 border rounded-md"/>
         </div>
 
         {/* Kind */}
         <div>
-          <label className="block mb-1 font-medium">
-            Kind <span style={{ color: "red" }}>*</span>
-          </label>
-          <select
-            value={kind}
-            onChange={(e) => setKind(e.target.value)}
-            required
-            className="w-full p-2 border rounded-md"
-          >
+          <label className="block mb-1 font-medium">Kind *</label>
+          <select value={kind} onChange={(e) => setKind(e.target.value)} required className="w-full p-2 border rounded-md">
             <option value="">Select kind</option>
             <option value="homework">Homework Assignment</option>
             <option value="exam">Exam Preparation</option>
@@ -184,15 +131,8 @@ export default function CreateTask({ userId, onCancel, onAddTask }) {
 
         {/* Priority */}
         <div>
-          <label className="block mb-1 font-medium">
-            Priority <span style={{ color: "red" }}>*</span>
-          </label>
-          <select
-            value={priority}
-            onChange={(e) => setPriority(e.target.value)}
-            required
-            className="w-full p-2 border rounded-md"
-          >
+          <label className="block mb-1 font-medium">Priority *</label>
+          <select value={priority} onChange={(e) => setPriority(e.target.value)} required className="w-full p-2 border rounded-md">
             <option value="">Select priority</option>
             <option value="low">Low</option>
             <option value="medium">Medium</option>
@@ -203,37 +143,19 @@ export default function CreateTask({ userId, onCancel, onAddTask }) {
         {/* Task Type Toggle */}
         <div className={`toggle-switch ${taskType === "group" ? "group-active" : ""}`}>
           <div className="switch-slider"></div>
-          <div
-            className={`switch-option ${taskType === "my" ? "active" : ""}`}
-            onClick={() => setTaskType("my")}
-          >
-            My Task
-          </div>
-          <div
-            className={`switch-option ${taskType === "group" ? "active" : ""}`}
-            onClick={() => setTaskType("group")}
-          >
-            Group Task
-          </div>
+          <div className={`switch-option ${taskType === "my" ? "active" : ""}`} onClick={() => setTaskType("my")}>My Task</div>
+          <div className={`switch-option ${taskType === "group" ? "active" : ""}`} onClick={() => setTaskType("group")}>Group Task</div>
         </div>
 
-        {/* Group Dropdown */}
+        {/* Group Selection */}
         {taskType === "group" && (
           <div>
-            <label className="block mb-1 font-medium">
-              Select Group <span style={{ color: "red" }}>*</span>
-            </label>
-            <select
-              value={selectedGroup}
-              onChange={(e) => setSelectedGroup(e.target.value)}
-              required
-              className="w-full p-2 border rounded-md"
-            >
+            <label className="block mb-1 font-medium">Select Group *</label>
+            <select value={selectedGroup} onChange={(e) => setSelectedGroup(e.target.value)}
+                    className="w-full p-2 border rounded-md">
               <option value="">-- Choose a Group --</option>
               {groups.map((group) => (
-                <option key={group} value={group}>
-                  {group}
-                </option>
+                <option key={group.id} value={group.id}>{group.name}</option>
               ))}
             </select>
           </div>
@@ -242,31 +164,28 @@ export default function CreateTask({ userId, onCancel, onAddTask }) {
         {/* Optional Fields */}
         <div>
           <label className="block mb-1 font-medium">Assignee</label>
-          <input
-            type="text"
-            value={assignee}
-            onChange={(e) => setAssignee(e.target.value)}
-            className="w-full p-2 border rounded-md"
-          />
+          <input type="text" value={assignee} onChange={(e) => setAssignee(e.target.value)}
+                 className="w-full p-2 border rounded-md"/>
         </div>
 
         <div>
           <label className="block mb-1 font-medium">Notes</label>
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            className="w-full p-2 border rounded-md"
-          />
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
+                    className="w-full p-2 border rounded-md"/>
+        </div>
+
+        <div>
+          <label className="block mb-1 font-medium">Progress: {progress}%</label>
+          <input type="range" min="0" max="100" value={progress} onChange={(e) => setProgress(Number(e.target.value))}
+                 className="w-full"/>
         </div>
 
         {/* Buttons */}
         <div className="form-buttons mt-4 flex gap-2">
-          <button type="submit" className="btn-primary flex-1" disabled={loading}>
-            {loading ? "Creating..." : "Create Task"}
+          <button type="submit" className="btn-primary flex-1" disabled={!isValid || loading}>
+            Create Task
           </button>
-          <button type="button" onClick={onCancel} className="btn-cancel flex-1" disabled={loading}>
-            Cancel
-          </button>
+          <button type="button" onClick={onCancel} className="btn-cancel flex-1" disabled={loading}>Cancel</button>
         </div>
       </form>
     </div>

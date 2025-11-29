@@ -637,3 +637,45 @@
   font-weight: 500;
   margin-top: 0.5rem;
 }
+
+.app-container .form-input {
+  text-align: center;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #1fa6d7;
+  border-radius: 0.5rem;
+  font-size: 1rem;
+  background-color: white;
+  transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.app-container .form-input:focus {
+  border-color: #24ae9f;
+  box-shadow: 0 0 0 3px rgba(36, 174, 159, 0.3);
+  outline: none;
+}
+
+/* ============================= */
+/* Profile & ManageGroup Buttons Alignment */
+/* ============================= */
+.app-container .profile-groups li,
+.app-container .modal-content ul li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center; /* vertically center buttons with text */
+  margin-bottom: 0.75rem; /* a bit more spacing between items */
+}
+
+.app-container .profile-groups li button,
+.app-container .modal-content ul li button {
+  margin-left: 0.5rem; /* space between buttons and text */
+  padding: 0.3rem 0.6rem;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.app-container .profile-groups li div,
+.app-container .modal-content ul li div {
+  display: flex;
+  gap: 0.5rem; /* more space between multiple buttons */
+}

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 
-export default function CreateGroup({ onCancel, onAddGroup }) {
+export default function CreateGroup({ userId, onCancel, onAddGroup }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [groupNumber, setGroupNumber] = useState(generateGroupNumber());
@@ -15,7 +15,7 @@ export default function CreateGroup({ onCancel, onAddGroup }) {
   }
 
   function generateInviteLink() {
-    const randomString = Math.random().toString(36).substring(2, 8); // random 6 chars
+    const randomString = Math.random().toString(36).substring(2, 8);
     return `https://myapp.com/invite/${randomString}`;
   }
 
@@ -41,6 +41,7 @@ export default function CreateGroup({ onCancel, onAddGroup }) {
     setLoading(true);
 
     try {
+      // 1️⃣ Create the group
       const res = await fetch("http://localhost:5000/api/groups", {
         method: "POST",
         headers: {
@@ -51,19 +52,17 @@ export default function CreateGroup({ onCancel, onAddGroup }) {
       });
 
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to create group");
 
-      if (!res.ok) {
-        throw new Error(data.error || "Failed to create group");
-      }
-
+      const groupId = data.group?.id || Date.now();
       console.log("✅ Group created:", data);
 
-      // Optionally update parent component
+      // 3️⃣ Notify parent component
       if (onAddGroup) {
-        onAddGroup({ ...group, id: data.group?.id || Date.now() });
+        onAddGroup({ ...group, id: groupId, role: "admin" });
       }
 
-      // Reset form after successful creation
+      // 4️⃣ Reset form
       setName("");
       setDescription("");
       setGroupNumber(generateGroupNumber());
@@ -83,12 +82,9 @@ export default function CreateGroup({ onCancel, onAddGroup }) {
   // -----------------------------
   return (
     <div className="card">
-      <h2 className="text-xl font-semibold mb-4 text-center">
-        Create New Group
-      </h2>
+      <h2 className="text-xl font-semibold mb-4 text-center">Create New Group</h2>
 
       <form className="space-y-4" onSubmit={handleSubmit}>
-        {/* Name */}
         <div>
           <label className="block mb-1 font-medium">
             Name <span className="text-red-500">*</span>
@@ -102,7 +98,6 @@ export default function CreateGroup({ onCancel, onAddGroup }) {
           />
         </div>
 
-        {/* Description */}
         <div>
           <label className="block mb-1 font-medium">Description</label>
           <textarea
@@ -112,7 +107,6 @@ export default function CreateGroup({ onCancel, onAddGroup }) {
           />
         </div>
 
-        {/* Group Number (auto) */}
         <div>
           <label className="block mb-1 font-medium">Group #</label>
           <input
@@ -123,7 +117,6 @@ export default function CreateGroup({ onCancel, onAddGroup }) {
           />
         </div>
 
-        {/* Invite Link (auto) */}
         <div>
           <label className="block mb-1 font-medium">Invite Link</label>
           <input
@@ -134,7 +127,6 @@ export default function CreateGroup({ onCancel, onAddGroup }) {
           />
         </div>
 
-        {/* Submit & Cancel */}
         <div className="form-buttons mt-4 flex gap-2">
           <button
             type="submit"

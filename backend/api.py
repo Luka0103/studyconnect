@@ -5,12 +5,12 @@ import os
 from dotenv import load_dotenv
 from keycloak import KeycloakOpenID
 from keycloak.exceptions import KeycloakError
-from .models import User
+from .models import User, Group
 from .services import (
     db, create_task_service, create_group_service,
     get_tasks_for_user, get_groups_for_user,
-    join_group_service, update_task_service,
-    get_or_create_user_from_keycloak, get_all_groups
+    join_group_service, kick_from_group_service, leave_group_service, promote_to_admin_service, update_task_service,
+    get_or_create_user_from_keycloak, get_all_groups, update_user_service
 )
 from .auth import create_user, get_user_by_id, keycloak_protect, keycloak_admin, set_user_password, update_user
 
@@ -63,8 +63,18 @@ def task_to_dict(t):
         "assignee": t.assignee,
     }
 
-def group_to_dict(g):
-    members = [u.id for u in g.members] if g.members else []
+def group_to_dict(g: Group, user_id: str = None):
+    """
+    Serialize a Group object, including the role of a specific user if provided.
+    """
+    user_role = None
+    if user_id:
+        membership = next((m for m in g.group_memberships if m.user_id == user_id), None)
+        if membership:
+            user_role = membership.role
+
+    members = [m.user_id for m in g.group_memberships]
+
     return {
         "id": g.id,
         "name": g.name,
@@ -73,6 +83,7 @@ def group_to_dict(g):
         "inviteLink": g.invite_link,
         "members": members,
         "memberCount": len(members),
+        "role": user_role  # This is what the frontend needs
     }
 
 # -----------------------------
@@ -88,7 +99,6 @@ def populate_keycloak_users():
                 user_id = kc_user.get("id") or kc_user.get("sub")
                 if not user_id:
                     continue
-                # Updated to SQLAlchemy 2.x style
                 existing_user = db.session.get(User, user_id)
                 if not existing_user:
                     username = kc_user.get("username") or kc_user.get("email")
@@ -102,8 +112,10 @@ def populate_keycloak_users():
             print(f"Error populating users: {e}")
 
 # -----------------------------
-# Authentication Route
+# POST Routes
 # -----------------------------
+
+# Authentication
 @app.route("/api/login", methods=["POST"])
 def login():
     data = request.json
@@ -122,132 +134,6 @@ def login():
     except Exception as e:
         return jsonify({"error": "Login failed", "details": str(e)}), 401
 
-# -----------------------------
-# Protected Routes
-# -----------------------------
-@app.route("/api/users/<string:user_id>", methods=["GET"])
-@keycloak_protect
-def get_user(user_id):
-    try:
-        user = User.query.get(user_id)
-        if not user:
-            # Fetch Keycloak info dynamically
-            auth_header = request.headers.get("Authorization")
-            token = auth_header.split()[1]
-            kc_userinfo = keycloak_openid.userinfo(token)
-            if kc_userinfo.get("sub") == user_id:
-                user = get_or_create_user_from_keycloak(kc_userinfo)
-            else:
-                return jsonify({"error": "User not found"}), 404
-
-        return jsonify({
-            "id": user.id,
-            "name": user.username,
-            "email": user.email,
-            "birthday": user.birthday.isoformat() if user.birthday else None,
-            "faculty": user.faculty
-        }), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/tasks/user/<string:user_id>", methods=["GET"])
-@keycloak_protect
-def get_tasks_for_specific_user(user_id):
-    try:
-        user = User.query.get(user_id)
-        if not user:
-            auth_header = request.headers.get("Authorization")
-            token = auth_header.split()[1]
-            kc_userinfo = keycloak_openid.userinfo(token)
-            if kc_userinfo.get("sub") == user_id:
-                user = get_or_create_user_from_keycloak(kc_userinfo)
-            else:
-                return jsonify({"error": "User not found"}), 404
-
-        tasks = get_tasks_for_user(user.id)
-        return jsonify([task_to_dict(t) for t in tasks]), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/groups/user/<string:user_id>", methods=["GET"])
-@keycloak_protect
-def get_groups_for_specific_user(user_id):
-    try:
-        user = User.query.get(user_id)
-        if not user:
-            auth_header = request.headers.get("Authorization")
-            token = auth_header.split()[1]
-            kc_userinfo = keycloak_openid.userinfo(token)
-            if kc_userinfo.get("sub") == user_id:
-                user = get_or_create_user_from_keycloak(kc_userinfo)
-            else:
-                return jsonify({"error": "User not found"}), 404
-
-        groups = get_groups_for_user(user.id)
-        return jsonify([group_to_dict(g) for g in groups]), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# -----------------------------
-# Other Task & Group Routes
-# -----------------------------
-@app.route("/api/tasks", methods=["POST"])
-@keycloak_protect
-def create_task():
-    data = request.json
-    kc_user = get_or_create_user_from_keycloak(request.user)
-    data["user_id"] = kc_user.id  # string
-    try:
-        task = create_task_service(data)
-        return jsonify({"message": "Task created", "task": task_to_dict(task)}), 201
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-@app.route("/api/tasks", methods=["GET"])
-@keycloak_protect
-def get_tasks():
-    kc_user = get_or_create_user_from_keycloak(request.user)
-    tasks = get_tasks_for_user(kc_user.id)
-    return jsonify([task_to_dict(t) for t in tasks]), 200
-
-@app.route("/api/groups", methods=["POST"])
-@keycloak_protect
-def create_group():
-    data = request.json
-    try:
-        group = create_group_service(data)
-        return jsonify({"message": "Group created", "group": group_to_dict(group)}), 201
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-    
-@app.route("/api/groups", methods=["GET"])
-@keycloak_protect
-def get_all_groups_endpoint():
-    """Return all groups for listing and joining."""
-    try:
-        groups = get_all_groups()
-        return jsonify([group_to_dict(g) for g in groups]), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/groups/join", methods=["POST"])
-@keycloak_protect
-def join_group():
-    data = request.json
-    kc_user = get_or_create_user_from_keycloak(request.user)
-    group_id = data.get("group_id")
-
-    try:
-        group = join_group_service(kc_user.id, group_id)
-        return jsonify({
-            "message": f"User {kc_user.id} joined group {group.name}",
-            "group": group_to_dict(group)
-        }), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-
 @app.route("/api/refresh", methods=["POST"])
 def refresh_token():
     data = request.json
@@ -257,7 +143,6 @@ def refresh_token():
         return jsonify({"error": "Missing refresh token"}), 400
 
     try:
-        # Get new tokens from Keycloak
         new_tokens = keycloak_openid.refresh_token(refresh_token)
 
         return jsonify({
@@ -271,21 +156,7 @@ def refresh_token():
             "details": str(e)
         }), 401
 
-@app.route("/api/tasks/<int:task_id>", methods=["PUT"])
-@keycloak_protect
-def update_task(task_id):
-    """Update a specific task."""
-    data = request.json
-    try:
-        # Call your existing service
-        updated_task = update_task_service(task_id, data)
-        return jsonify({
-            "message": "Task updated",
-            "task": task_to_dict(updated_task)
-        }), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-    
+# User Registration
 @app.route("/api/users/register", methods=["POST"])
 def register_user():
     data = request.json
@@ -301,7 +172,6 @@ def register_user():
         return jsonify({"error": "firstName, lastName, username, email, and password are required"}), 400
 
     try:
-        # 1️⃣ Create Keycloak user
         payload = {
             "username": username,
             "email": email,
@@ -317,14 +187,9 @@ def register_user():
         result = create_user(payload)
         new_user_id = result if isinstance(result, str) else result.get("id")
         kc_user = get_user_by_id(new_user_id)
-
-        # 2️⃣ Set password
         set_user_password(new_user_id, password, temporary=False)
-
-        # 3️⃣ Remove required actions
         update_user(new_user_id, {"requiredActions": []})
 
-        # 4️⃣ Optional: Add user to local DB
         birthday_date = (
             datetime.strptime(birthday, "%Y-%m-%d").date() if birthday else None
         )
@@ -352,6 +217,244 @@ def register_user():
     except Exception as e:
         return jsonify({"error": "Keycloak or internal error", "details": str(e)}), 500
 
+# Task Creation
+@app.route("/api/tasks", methods=["POST"])
+@keycloak_protect
+def create_task():
+    data = request.json
+    kc_user = get_or_create_user_from_keycloak(request.user)
+    data["user_id"] = kc_user.id
+    try:
+        task = create_task_service(data)
+        return jsonify({"message": "Task created", "task": task_to_dict(task)}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+# Group Creation / Join / Leave / Promote / Kick
+@app.route("/api/groups", methods=["POST"])
+@keycloak_protect
+def create_group():
+    data = request.json
+    try:
+        kc_user = get_or_create_user_from_keycloak(request.user)
+        group = create_group_service(data, creator_id=kc_user.id)
+        return jsonify({
+            "message": "Group created",
+            "group": group_to_dict(group)
+        }), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/api/groups/join", methods=["POST"])
+@keycloak_protect
+def join_group():
+    data = request.json
+    kc_user = get_or_create_user_from_keycloak(request.user)
+    group_id = data.get("group_id")
+    try:
+        group = join_group_service(kc_user.id, group_id)
+        return jsonify({
+            "message": f"User {kc_user.id} joined group {group.name}",
+            "group": group_to_dict(group)
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/api/groups/<int:group_id>/kick", methods=["POST"])
+@keycloak_protect
+def kick_user(group_id):
+    kc_user = get_or_create_user_from_keycloak(request.user)
+    data = request.json
+    user_id = data.get("user_id")
+    try:
+        kick_from_group_service(kc_user.id, user_id, group_id)
+        return jsonify({"message": "User removed"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/api/groups/<int:group_id>/add-admin", methods=["POST"])
+@keycloak_protect
+def promote_admin(group_id):
+    kc_user = get_or_create_user_from_keycloak(request.user)
+    data = request.json
+    user_id = data.get("user_id")
+    try:
+        promote_to_admin_service(kc_user.id, user_id, group_id)
+        return jsonify({"message": "User promoted"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/api/groups/<int:group_id>/leave", methods=["POST"])
+@keycloak_protect
+def leave_group(group_id):
+    kc_user = get_or_create_user_from_keycloak(request.user)
+    try:
+        leave_group_service(kc_user.id, group_id)
+        return jsonify({"message": "You have left the group"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+# -----------------------------
+# GET Routes
+# -----------------------------
+
+# Users
+@app.route("/api/users/<string:user_id>", methods=["GET"])
+@keycloak_protect
+def get_user(user_id):
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            auth_header = request.headers.get("Authorization")
+            token = auth_header.split()[1]
+            kc_userinfo = keycloak_openid.userinfo(token)
+            if kc_userinfo.get("sub") == user_id:
+                user = get_or_create_user_from_keycloak(kc_userinfo)
+            else:
+                return jsonify({"error": "User not found"}), 404
+
+        return jsonify({
+            "id": user.id,
+            "name": user.username,
+            "email": user.email,
+            "birthday": user.birthday.isoformat() if user.birthday else None,
+            "faculty": user.faculty
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# Tasks
+@app.route("/api/tasks", methods=["GET"])
+@keycloak_protect
+def get_tasks():
+    kc_user = get_or_create_user_from_keycloak(request.user)
+    tasks = get_tasks_for_user(kc_user.id)
+    return jsonify([task_to_dict(t) for t in tasks]), 200
+
+@app.route("/api/tasks/user/<string:user_id>", methods=["GET"])
+@keycloak_protect
+def get_tasks_for_specific_user(user_id):
+    tasks = get_tasks_for_user(user_id)
+    return jsonify([task_to_dict(t) for t in tasks]), 200
+
+# Groups
+@app.route("/api/groups", methods=["GET"])
+@keycloak_protect
+def get_all_groups_endpoint():
+    try:
+        groups = get_all_groups()
+        return jsonify([group_to_dict(g) for g in groups]), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/groups/user/<string:user_id>", methods=["GET"])
+@keycloak_protect
+def get_groups_for_specific_user(user_id):
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            auth_header = request.headers.get("Authorization")
+            token = auth_header.split()[1]
+            kc_userinfo = keycloak_openid.userinfo(token)
+            if kc_userinfo.get("sub") == user_id:
+                user = get_or_create_user_from_keycloak(kc_userinfo)
+            else:
+                return jsonify({"error": "User not found"}), 404
+
+        groups = get_groups_for_user(user.id)
+        groups_serialized = [group_to_dict(g, user.id) for g in groups]
+
+        return jsonify(groups_serialized), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
+@app.route("/api/groups/user/admin/<string:user_id>", methods=["GET"])
+@keycloak_protect
+def get_groups_for_specific_admin_user(user_id):
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            auth_header = request.headers.get("Authorization")
+            token = auth_header.split()[1]
+            kc_userinfo = keycloak_openid.userinfo(token)
+            if kc_userinfo.get("sub") == user_id:
+                user = get_or_create_user_from_keycloak(kc_userinfo)
+            else:
+                return jsonify({"error": "User not found"}), 404
+
+        # Fetch all groups the user belongs to
+        all_groups = get_groups_for_user(user.id)
+
+        # Only include groups where the user is admin
+        admin_groups = []
+        for g in all_groups:
+            membership = next((m for m in g.group_memberships if m.user_id == user.id), None)
+            if membership and membership.role == "admin":
+                admin_groups.append(g)
+
+        # Serialize
+        groups_serialized = [group_to_dict(g, user.id) for g in admin_groups]
+
+        return jsonify(groups_serialized), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/groups/<int:group_id>/members", methods=["GET"])
+@keycloak_protect
+def get_group_members(group_id):
+    try:
+        group = Group.query.get(group_id)
+        if not group:
+            return jsonify({"error": "Group not found"}), 404
+
+        members = []
+        for membership in group.group_memberships:
+            user = membership.user
+            if user:
+                members.append({
+                    "id": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "role": membership.role
+                })
+
+        return jsonify({"members": members}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# -----------------------------
+# PUT Routes
+# -----------------------------
+@app.route("/api/tasks/<int:task_id>", methods=["PUT"])
+@keycloak_protect
+def update_task(task_id):
+    data = request.json
+    kc_user = get_or_create_user_from_keycloak(request.user)
+    try:
+        updated_task = update_task_service(task_id, data, kc_user.id)
+        return jsonify({"message": "Task updated", "task": task_to_dict(updated_task)}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/api/users/<string:user_id>", methods=["PUT"])
+@keycloak_protect
+def update_user(user_id):
+    kc_user = get_or_create_user_from_keycloak(request.user)
+    if kc_user.id != user_id:
+        return jsonify({"error": "Cannot edit another user"}), 403
+
+    data = request.json
+    try:
+        updated = update_user_service(user_id, data)
+        return jsonify({
+            "id": updated.id,
+            "username": updated.username,
+            "email": updated.email,
+            "birthday": updated.birthday.isoformat() if updated.birthday else None,
+            "faculty": updated.faculty
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 # -----------------------------
 # Run App
