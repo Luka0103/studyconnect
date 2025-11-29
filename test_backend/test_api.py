@@ -22,7 +22,7 @@ class DummyGroup:
         self.description = "Desc"
         self.group_number = "A1"
         self.invite_link = "abc123"
-        self.members = []
+        self.group_memberships = [] # Geändert von self.members
 
 # Tests conversion of DummyTask to dictionary.
 def test_task_to_dict_basic():
