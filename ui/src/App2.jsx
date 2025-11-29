@@ -74,9 +74,11 @@ export default function App2({ token, userId, onLogout }) {
       });
 
       const task = { ...data.task, id: String(data.task.id) };
+      const statusKey = (task.status || "todo").replace(/_([a-z])/g, (g) => g[1].toUpperCase());
+
       setColumns((prev) => ({
         ...prev,
-        [task.status || "todo"]: [...prev[task.status || "todo"], task],
+        [statusKey]: [...(prev[statusKey] || []), task],
       }));
       setShowForm(null);
     } catch (err) {
@@ -95,12 +97,14 @@ export default function App2({ token, userId, onLogout }) {
       );
 
       const task = { ...data.task, id: String(data.task.id) };
+      const statusKey = (task.status || "todo").replace(/_([a-z])/g, (g) => g[1].toUpperCase());
+
       setColumns((prev) => {
         const newCols = { ...prev };
         Object.keys(newCols).forEach((col) => {
           newCols[col] = newCols[col].filter((t) => t.id !== task.id);
         });
-        newCols[task.status || "todo"].push(task);
+        newCols[statusKey].push(task);
         return newCols;
       });
       setSelectedTask(null);
@@ -117,6 +121,7 @@ export default function App2({ token, userId, onLogout }) {
       });
 
       fetchGroups();
+      fetchTasks(); 
       setShowForm(null);
     } catch (err) {
       alert("Error joining group: " + err.message);
@@ -319,6 +324,7 @@ export default function App2({ token, userId, onLogout }) {
           <div className="modal-content">
             <Profile
               userId={userId}
+              onUpdate={fetchTasks} // Pass the fetchTasks function
               onClose={() => setShowProfile(false)}
             />
           </div>
@@ -329,6 +335,7 @@ export default function App2({ token, userId, onLogout }) {
       <EditTaskModal
         task={selectedTask}
         userId={userId}
+        onUpdate={fetchTasks} 
         onSave={handleUpdateTask}
         onCancel={() => setSelectedTask(null)}
       />

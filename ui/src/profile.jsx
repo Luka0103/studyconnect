@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import ManageGroupModal from "./components/ManageGroupModal";
 import { fetchWithToken } from "./api";
 
-export default function Profile({ userId, onClose }) {
+export default function Profile({ userId, onClose, onUpdate }) {
   const [user, setUser] = useState(null);
   const [adminGroups, setAdminGroups] = useState([]);
   const [joinedGroups, setJoinedGroups] = useState([]);
@@ -85,6 +85,7 @@ export default function Profile({ userId, onClose }) {
 
       alert(data.message);
       await fetchGroups(); // Refresh groups
+      if (onUpdate) onUpdate(); // Trigger task refresh in App2.jsx
       setManagedGroup(null);
     } catch (err) {
       console.error(err);
@@ -207,6 +208,7 @@ export default function Profile({ userId, onClose }) {
       {managedGroup && (
         <ManageGroupModal
           group={managedGroup}
+          onUpdate={onUpdate} // Pass the refresh function down
           onClose={() => setManagedGroup(null)}
         />
       )}

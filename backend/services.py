@@ -224,19 +224,13 @@ def get_tasks_for_user(user_id: str):
     if not user:
         raise Exception(f"User with id {user_id} does not exist")
 
-    # 1. Finde alle Gruppen, in denen der Benutzer Mitglied ist.
+    # 1. Find all groups the user is a member of.
     group_ids = [m.group.id for m in user.group_memberships]
 
-    # 2. Finde alle Benutzer, die in diesen Gruppen sind.
-    member_ids_query = db.session.query(GroupMembership.user_id).filter(GroupMembership.group_id.in_(group_ids))
-    all_member_ids = [item[0] for item in member_ids_query.distinct()]
-
-    # 3. Rufe alle Aufgaben ab, die:
-    #    a) dem aktuellen Benutzer persönlich gehören (ohne Gruppe)
-    #    b) einer der Gruppen des Benutzers zugeordnet sind
-    #    c) einem anderen Mitglied einer dieser Gruppen persönlich gehören
+    # 2. Fetch all tasks that are either assigned to the user personally (user_id matches)
+    #    OR are assigned to one of the user's groups (group_id is in their group list).
     return Task.query.filter(
-        (Task.user_id == user_id) | (Task.group_id.in_(group_ids)) | (Task.user_id.in_(all_member_ids) & Task.group_id.isnot(None))
+        (Task.user_id == user_id) | (Task.group_id.in_(group_ids))
     ).all()
 
 

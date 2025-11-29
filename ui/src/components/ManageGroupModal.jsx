@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { fetchWithToken } from "../api";
 
-export default function ManageGroupModal({ group, onClose }) {
+export default function ManageGroupModal({ group, onClose, onUpdate }) {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -41,6 +41,7 @@ export default function ManageGroupModal({ group, onClose }) {
       // Remove user from local state to update UI
       setMembers((prev) => prev.filter((m) => m.id !== memberId));
       alert("User removed successfully!");
+      if (onUpdate) onUpdate(); // Trigger task refresh in App2.jsx
     } catch (err) {
       console.error(err);
       alert("Error removing user: " + err.message);
@@ -67,6 +68,7 @@ export default function ManageGroupModal({ group, onClose }) {
         )
       );
       alert("User promoted to admin!");
+      if (onUpdate) onUpdate(); // Also refresh on promote, in case it affects task visibility
     } catch (err) {
       console.error(err);
       alert("Error promoting user: " + err.message);

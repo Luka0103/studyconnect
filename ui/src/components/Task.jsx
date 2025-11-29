@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { fetchWithToken } from '../api.js'; 
 
-export default function EditTaskModal({ task, onSave, onCancel, userId }) {
+export default function EditTaskModal({ task, onSave, onCancel, userId, onUpdate }) {
   const [title, setTitle] = useState("");
   const [deadline, setDeadline] = useState("");
   const [kind, setKind] = useState("");
@@ -53,6 +53,7 @@ export default function EditTaskModal({ task, onSave, onCancel, userId }) {
       progress,
     };
     onSave(updatedTask);
+    if (onUpdate) onUpdate(); // Trigger task refresh after saving
   };
 
   const isValid =
