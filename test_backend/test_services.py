@@ -506,11 +506,18 @@ def test_get_groups_for_user_returns_empty_list_when_user_has_no_groups():
 # -----------------------------
 # Entity-specific validation tests
 # -----------------------------
-def test_update_task_service_validates_status_transition():
-    task = FakeTask(id="t3", status="todo")
+def test_update_task_service_validates_status_transition(monkeypatch):
+    task = FakeTask(id="t3", status="todo", deadline=date(2025, 1, 1))
     services.Task = FakeTask
     services.db = make_fake_db()
     services.db.session.get.return_value = task
+
+    # Mock date.today() to return a fixed date before the task's deadline
+    class FakeDate(date):
+        @classmethod
+        def today(cls):
+            return date(2024, 1, 1)
+    monkeypatch.setattr(services, "date", FakeDate, raising=False)
 
     # Valid transition todo -> in_progress
     services.update_task_service("t3", {"status": "in_progress"})
@@ -573,7 +580,7 @@ def test_task_assignment_validation():
     # Create two users - one in group, one not
     group_user = FakeUser(id="u12")
     other_user = FakeUser(id="other-user")
-    group_user.group_memberships = [SimpleNamespace(group=SimpleNamespace(id=5))]
+    group_user.group_memberships = [SimpleNamespace(group_id=5, group=SimpleNamespace(id=5))]
     
     task = FakeTask(
         id="t6", 
