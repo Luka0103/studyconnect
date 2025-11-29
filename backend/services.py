@@ -5,9 +5,9 @@ from .models import db, User, Group, Task, GroupMembership
 VALID_PRIORITIES = ['low', 'medium', 'high']
 VALID_STATUSES = {
     'todo': ['in_progress'],
-    'in_progress': ['done', 'blocked'],
+    'in_progress': ['done', 'blocked', 'todo'],
     'blocked': ['in_progress'],
-    'done': []
+    'done': ['in_progress', 'todo']
 }
 
 
@@ -45,6 +45,13 @@ class UserService:
         self.db.add(new_user)
         self.db.commit()
         return new_user
+
+    def login(self, username, password):
+        """Logs a user in via Keycloak and returns a token."""
+        from backend.api import keycloak_openid
+        # This will call the patched keycloak_openid in tests
+        token = keycloak_openid.token(username, password)
+        return token
 
     def get_or_create_user_from_keycloak(self, keycloak_userinfo):
         """Stellt sicher, dass ein Keycloak-Benutzer in der lokalen DB existiert."""
@@ -132,17 +139,36 @@ def create_task_service(data):
     return task
 
 
-def update_task_service(task_id, data):
+def update_task_service(task_id, data, editor_user_id=None):
     task = db.session.get(Task, task_id)
     if not task:
         raise Exception(f"Task with id {task_id} does not exist")
 
+    # Vorab-Bereinigung: Der Status 'expired' ist ein reiner Anzeige-Zustand des Frontends
+    # und darf niemals in die Datenbank geschrieben oder validiert werden.
+    if data.get('status') == 'expired':
+        del data['status']
+
     # Validate status transition
     if 'status' in data:
-        current_status = task.status
-        new_status = data['status']
-        if new_status not in VALID_STATUSES.get(current_status, []):
+        # Normalisiere sowohl den aktuellen als auch den neuen Status, um Inkonsistenzen zu beheben
+        current_status = task.status.lower().replace("inprogress", "in_progress").replace("expired", "todo")
+        # Konvertiere den empfangenen Status in Kleinbuchstaben, um Case-Probleme zu vermeiden (z.B. inProgress vs. in_progress)
+        new_status = data['status'].lower().replace("inprogress", "in_progress")
+        # Speichere die korrigierte Version zurück in die Daten, damit sie korrekt gespeichert wird
+        data['status'] = new_status
+
+        # Validiere den Übergang nur, wenn sich der Status tatsächlich ändert.
+        if new_status != current_status and new_status not in VALID_STATUSES.get(current_status, []):
             raise ValueError(f"Invalid status transition from {current_status} to {new_status}")
+        
+        # Verhindern, dass eine abgelaufene Aufgabe gestartet wird
+        if new_status == 'in_progress' and task.deadline < date.today():
+            raise ValueError("Cannot start a task that is past its deadline.")
+        
+        # Wenn eine Aufgabe auf 'done' gesetzt wird, setze den Fortschritt automatisch auf 100.
+        if new_status == 'done':
+            task.progress = 100
 
     # Validate progress
     if 'progress' in data:
@@ -155,18 +181,33 @@ def update_task_service(task_id, data):
         if data['priority'] not in VALID_PRIORITIES:
             raise ValueError(f"Invalid priority value. Must be one of: {VALID_PRIORITIES}")
 
+    # Validate group assignment permission
+    if data.get('group_id') is not None:
+        if not editor_user_id:
+            raise PermissionError("User ID is required to assign a task to a group.")
+        
+        editor = db.session.get(User, editor_user_id)
+        if not any(m.group_id == data['group_id'] for m in editor.group_memberships):
+            raise PermissionError("You can only assign tasks to groups you are a member of.")
+
     # Validate assignee
-    if 'assignee' in data:
+    if data.get('assignee') is not None:
         assignee = db.session.get(User, data['assignee'])
         if not assignee:
             raise ValueError("Assignee user not found")
-        if task.group_id and task.group_id not in [m.group.id for m in assignee.group_memberships]:
+        
+        # The group_id to check against is either the new one from `data` or the existing one on the task
+        target_group_id = data.get('group_id', task.group_id)
+        if target_group_id and not any(m.group_id == target_group_id for m in assignee.group_memberships):
             raise ValueError("Assignee must be member of the group")
 
     # Update fields
     for field in ['title', 'kind', 'priority', 'status', 'user_id', 'group_id', 'assignee', 'notes', 'progress']:
-        if field in data:
+        if field in data and data[field] is not None:
             setattr(task, field, data[field])
+    
+    if 'group_id' in data: # Explizit group_id behandeln, um 'None' zu erlauben
+        task.group_id = data['group_id']
 
     if 'deadline' in data:
         deadline_date = datetime.strptime(data['deadline'], '%Y-%m-%d').date()
@@ -181,7 +222,7 @@ def update_task_service(task_id, data):
 def get_tasks_for_user(user_id: str):
     user = db.session.get(User, user_id)
     if not user:
-        return []
+        raise Exception(f"User with id {user_id} does not exist")
 
     group_ids = [m.group.id for m in user.group_memberships]
     return Task.query.filter(
@@ -238,6 +279,6 @@ def get_all_groups():
 def get_groups_for_user(user_id: str):
     user = db.session.get(User, user_id)
     if not user:
-        return []
+        raise Exception(f"User with id {user_id} does not exist")
     # Gibt eine Liste von Group-Objekten zurück, in denen der Benutzer Mitglied ist
     return [membership.group for membership in user.group_memberships]

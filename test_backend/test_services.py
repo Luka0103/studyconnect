@@ -266,12 +266,13 @@ def test_get_tasks_for_user_returns_tasks_for_user_and_group():
     assert result == [task_user, task_group]
 
 def test_get_tasks_for_user_returns_empty_list_when_user_missing():
+    """Tests that get_tasks_for_user raises an error if the user is not found."""
     services.User = FakeUser
     services.db = make_fake_db()
     services.db.session.get.return_value = None
 
-    result = services.get_tasks_for_user("nope")
-    assert result == []
+    with pytest.raises(Exception, match="does not exist"):
+        services.get_tasks_for_user("nope")
 
 # -----------------------------
 # Tests for get_all_tasks
@@ -484,12 +485,13 @@ def test_get_groups_for_user_returns_user_groups():
 
 
 def test_get_groups_for_user_returns_empty_list_when_user_not_found():
+    """Tests that get_groups_for_user raises an error if the user is not found."""
     services.User = FakeUser
     services.db = make_fake_db()
     services.db.session.get.return_value = None
 
-    result = services.get_groups_for_user("missing")
-    assert result == []
+    with pytest.raises(Exception, match="does not exist"):
+        services.get_groups_for_user("missing")
 
 
 def test_get_groups_for_user_returns_empty_list_when_user_has_no_groups():

@@ -321,18 +321,11 @@ def get_all_groups_endpoint():
 @keycloak_protect
 def get_groups_for_specific_user(user_id):
     try:
-        user = db.session.get(User, user_id)
+        # Der Decorator @keycloak_protect stellt sicher, dass request.user existiert.
+        # Wir müssen nur sicherstellen, dass der User in unserer lokalen DB ist.
         user_service = UserService(db.session, keycloak_admin)
-        if not user:
-            auth_header = request.headers.get("Authorization")
-            token = auth_header.split()[1]
-            kc_userinfo = keycloak_openid.userinfo(token)
-            if kc_userinfo.get("sub") == user_id:
-                user = user_service.get_or_create_user_from_keycloak(kc_userinfo)
-            else:
-                return jsonify({"error": "User not found"}), 404
-
-        groups = get_groups_for_user(user.id)
+        user = user_service.get_or_create_user_from_keycloak(request.user)
+        groups = get_groups_for_user(user.id) # Service-Funktion aufrufen
         groups_serialized = [group_to_dict(g, user.id) for g in groups]
 
         return jsonify(groups_serialized), 200
@@ -404,7 +397,7 @@ def update_task(task_id):
     user_service = UserService(db.session, keycloak_admin)
     kc_user = user_service.get_or_create_user_from_keycloak(request.user)
     try:
-        updated_task = update_task_service(task_id, data, kc_user.id)
+        updated_task = update_task_service(task_id, data, editor_user_id=kc_user.id)
         return jsonify({"message": "Task updated", "task": task_to_dict(updated_task)}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 400
