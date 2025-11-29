@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import ManageGroupModal from "./components/ManageGroupModal";
+import { fetchWithToken } from "./api";
 
-export default function Profile({ userId, fetchWithAuth, onClose }) {
+export default function Profile({ userId, onClose }) {
   const [user, setUser] = useState(null);
   const [adminGroups, setAdminGroups] = useState([]);
   const [joinedGroups, setJoinedGroups] = useState([]);
@@ -18,9 +19,7 @@ export default function Profile({ userId, fetchWithAuth, onClose }) {
 
   const fetchGroups = async () => {
     try {
-      const resGroup = await fetchWithAuth(`http://localhost:5000/api/groups/user/${userId}`);
-      const dataGroup = await resGroup.json();
-      if (!resGroup.ok) throw new Error(dataGroup.error || "Failed to load groups");
+      const dataGroup = await fetchWithToken(`http://localhost:5000/api/groups/user/${userId}`);
 
       setAdminGroups(dataGroup.filter((g) => g.role === "admin"));
       setJoinedGroups(dataGroup.filter((g) => g.role !== "admin"));
@@ -33,9 +32,7 @@ export default function Profile({ userId, fetchWithAuth, onClose }) {
   useEffect(() => {
     async function fetchUserData() {
       try {
-        const resUser = await fetchWithAuth(`http://localhost:5000/api/users/${userId}`);
-        const dataUser = await resUser.json();
-        if (!resUser.ok) throw new Error(dataUser.error || "Failed to load user");
+        const dataUser = await fetchWithToken(`http://localhost:5000/api/users/${userId}`);
 
         setUser(dataUser);
         setForm({
@@ -55,7 +52,7 @@ export default function Profile({ userId, fetchWithAuth, onClose }) {
     }
 
     fetchUserData();
-  }, [userId, fetchWithAuth]);
+  }, [userId]);
 
   const handleSave = async () => {
     try {
@@ -66,13 +63,10 @@ export default function Profile({ userId, fetchWithAuth, onClose }) {
         faculty: form.faculty,
       };
 
-      const res = await fetchWithAuth(`http://localhost:5000/api/users/${userId}`, {
+      const data = await fetchWithToken(`http://localhost:5000/api/users/${userId}`, {
         method: "PUT",
         body: JSON.stringify(payload),
       });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to update profile");
 
       setUser(data);
       setEditMode(false);
@@ -85,11 +79,9 @@ export default function Profile({ userId, fetchWithAuth, onClose }) {
 
   const handleLeaveGroup = async (groupId) => {
     try {
-      const res = await fetchWithAuth(`http://localhost:5000/api/groups/${groupId}/leave`, {
+      const data = await fetchWithToken(`http://localhost:5000/api/groups/${groupId}/leave`, {
         method: "POST",
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to leave group");
 
       alert(data.message);
       await fetchGroups(); // Refresh groups
@@ -215,7 +207,6 @@ export default function Profile({ userId, fetchWithAuth, onClose }) {
       {managedGroup && (
         <ManageGroupModal
           group={managedGroup}
-          fetchWithAuth={fetchWithAuth}
           onClose={() => setManagedGroup(null)}
         />
       )}

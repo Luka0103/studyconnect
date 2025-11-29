@@ -9,7 +9,7 @@ from .models import User, Group, db
 from .services import (
     create_task_service, create_group_service,
     get_tasks_for_user, get_groups_for_user,
-    join_group_service, update_task_service, get_all_groups,
+    join_group_service, update_task_service, get_all_groups, leave_group_service, promote_to_admin_service, kick_user_service,
     UserService
 )
 from .auth import create_user, get_user_by_id, keycloak_protect, keycloak_admin, set_user_password, update_user
@@ -100,8 +100,8 @@ def populate_keycloak_users():
                 if not user_id:
                     continue
                 existing_user = db.session.get(User, user_id)
-                # Logik in den Service verschoben, um Konsistenz zu wahren
-                # Hier rufen wir den Service auf, um den User anzulegen, falls er fehlt.
+                # Logic moved to the service to maintain consistency
+                # Here we call the service to create the user if they are missing.
                 user_service = UserService(db.session, keycloak_admin)
                 user_service.get_or_create_user_from_keycloak({
                     "sub": user_id,
@@ -174,10 +174,10 @@ def register_user():
         return jsonify({"error": "firstName, lastName, username, email, and password are required"}), 400
 
     try:
-        # Service initialisieren mit den echten Abhängigkeiten
+        # Initialize service with real dependencies
         user_service = UserService(db.session, keycloak_admin)
 
-        # Daten für den Service vorbereiten
+        # Prepare data for the service
         user_data = {
             "username": username,
             "email": email,
@@ -216,6 +216,7 @@ def create_task():
     data = request.json
     user_service = UserService(db.session, keycloak_admin)
     kc_user = user_service.get_or_create_user_from_keycloak(request.user)
+    # Set the user_id on the backend to ensure the creator is always the logged-in user.
     data["user_id"] = kc_user.id
     try:
         task = create_task_service(data)
@@ -255,11 +256,42 @@ def join_group():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
+@app.route("/api/groups/<int:group_id>/leave", methods=["POST"])
+@keycloak_protect
+def leave_group(group_id):
+    user_service = UserService(db.session, keycloak_admin)
+    kc_user = user_service.get_or_create_user_from_keycloak(request.user)
+    try:
+        leave_group_service(kc_user.id, group_id)
+        return jsonify({"message": "You have successfully left the group."}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/api/groups/<int:group_id>/add-admin", methods=["POST"])
+@keycloak_protect
+def add_admin_to_group(group_id):
+    data = request.json
+    user_to_promote_id = data.get("user_id")
+    user_service = UserService(db.session, keycloak_admin)
+    promoter = user_service.get_or_create_user_from_keycloak(request.user)
+    try:
+        promote_to_admin_service(promoter.id, user_to_promote_id, group_id)
+        return jsonify({"message": "User promoted to admin successfully."}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
 @app.route("/api/groups/<int:group_id>/kick", methods=["POST"])
 @keycloak_protect
 def kick_user(group_id):
-    # ... Implementierung mit Services ...
-    return jsonify({"message": "Not implemented yet"}), 501
+    data = request.json
+    user_to_kick_id = data.get("user_id")
+    user_service = UserService(db.session, keycloak_admin)
+    kicker = user_service.get_or_create_user_from_keycloak(request.user)
+    try:
+        kick_user_service(kicker.id, user_to_kick_id, group_id)
+        return jsonify({"message": "User kicked successfully."}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 # -----------------------------
 # GET Routes
@@ -321,11 +353,11 @@ def get_all_groups_endpoint():
 @keycloak_protect
 def get_groups_for_specific_user(user_id):
     try:
-        # Der Decorator @keycloak_protect stellt sicher, dass request.user existiert.
-        # Wir müssen nur sicherstellen, dass der User in unserer lokalen DB ist.
+        # The @keycloak_protect decorator ensures that request.user exists.
+        # We just need to ensure the user is in our local DB.
         user_service = UserService(db.session, keycloak_admin)
         user = user_service.get_or_create_user_from_keycloak(request.user)
-        groups = get_groups_for_user(user.id) # Service-Funktion aufrufen
+        groups = get_groups_for_user(user.id) # Call the service function
         groups_serialized = [group_to_dict(g, user.id) for g in groups]
 
         return jsonify(groups_serialized), 200

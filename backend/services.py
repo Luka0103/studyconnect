@@ -13,27 +13,27 @@ VALID_STATUSES = {
 
 class UserService:
     """
-    Service-Klasse für Benutzerlogik, um die Anforderungen von Übung 6.2 zu erfüllen.
-    Abhängigkeiten werden über den Konstruktor injiziert, um Mocking zu ermöglichen.
+    Service class for user logic to meet the requirements of Exercise 6.2.
+    Dependencies are injected via the constructor to allow for mocking.
     """
     def __init__(self, db_session, keycloak_admin_client):
         self.db = db_session
         self.keycloak_admin = keycloak_admin_client
 
     def register_user(self, user_data):
-        """Implementiert User Registration & Password Validation."""
+        """Implements user registration & password validation."""
         password = user_data.get("password")
 
-        # Anforderung aus 6.2: Password validation rules
+        # Requirement from 6.2: Password validation rules
         if not password or len(password) < 8:
             raise ValueError("Password must be at least 8 characters long.")
 
-        # 1. User in Keycloak anlegen
+        # 1. Create user in Keycloak
         new_user_id = self.keycloak_admin.create_user(user_data['keycloak_payload'])
         self.keycloak_admin.set_user_password(new_user_id, password, temporary=False)
         self.keycloak_admin.update_user(new_user_id, {"requiredActions": []})
 
-        # 2. User in lokaler DB anlegen
+        # 2. Create user in local DB
         birthday_date = datetime.strptime(user_data['birthday'], "%Y-%m-%d").date() if user_data.get('birthday') else None
         new_user = User(
             id=new_user_id,
@@ -54,7 +54,7 @@ class UserService:
         return token
 
     def get_or_create_user_from_keycloak(self, keycloak_userinfo):
-        """Stellt sicher, dass ein Keycloak-Benutzer in der lokalen DB existiert."""
+        """Ensures that a Keycloak user exists in the local DB."""
         user_id = keycloak_userinfo.get("sub")
         if not user_id:
             raise Exception("Missing Keycloak user ID (sub)")
@@ -69,12 +69,12 @@ class UserService:
         return user
 
     def update_user(self, user_id, data):
-        """Aktualisiert die Daten eines Benutzers in der lokalen DB."""
+        """Updates a user's data in the local DB."""
         user = self.db.get(User, user_id)
         if not user:
             raise Exception(f"User with id {user_id} not found.")
 
-        # Felder aktualisieren, die in den Daten vorhanden sind
+        # Update fields that are present in the data
         if 'username' in data:
             user.username = data['username']
         if 'email' in data:
@@ -144,29 +144,29 @@ def update_task_service(task_id, data, editor_user_id=None):
     if not task:
         raise Exception(f"Task with id {task_id} does not exist")
 
-    # Vorab-Bereinigung: Der Status 'expired' ist ein reiner Anzeige-Zustand des Frontends
-    # und darf niemals in die Datenbank geschrieben oder validiert werden.
+    # Pre-cleanup: The 'expired' status is a pure display state of the frontend
+    # and must never be written to or validated by the database.
     if data.get('status') == 'expired':
         del data['status']
 
     # Validate status transition
     if 'status' in data:
-        # Normalisiere sowohl den aktuellen als auch den neuen Status, um Inkonsistenzen zu beheben
+        # Normalize both the current and the new status to resolve inconsistencies
         current_status = task.status.lower().replace("inprogress", "in_progress").replace("expired", "todo")
-        # Konvertiere den empfangenen Status in Kleinbuchstaben, um Case-Probleme zu vermeiden (z.B. inProgress vs. in_progress)
+        # Convert the received status to lowercase to avoid case issues (e.g., inProgress vs. in_progress)
         new_status = data['status'].lower().replace("inprogress", "in_progress")
-        # Speichere die korrigierte Version zurück in die Daten, damit sie korrekt gespeichert wird
+        # Save the corrected version back to the data so it is stored correctly
         data['status'] = new_status
 
-        # Validiere den Übergang nur, wenn sich der Status tatsächlich ändert.
+        # Only validate the transition if the status actually changes.
         if new_status != current_status and new_status not in VALID_STATUSES.get(current_status, []):
             raise ValueError(f"Invalid status transition from {current_status} to {new_status}")
         
-        # Verhindern, dass eine abgelaufene Aufgabe gestartet wird
+        # Prevent a past-due task from being started
         if new_status == 'in_progress' and task.deadline < date.today():
             raise ValueError("Cannot start a task that is past its deadline.")
         
-        # Wenn eine Aufgabe auf 'done' gesetzt wird, setze den Fortschritt automatisch auf 100.
+        # If a task is set to 'done', automatically set its progress to 100.
         if new_status == 'done':
             task.progress = 100
 
@@ -206,7 +206,7 @@ def update_task_service(task_id, data, editor_user_id=None):
         if field in data and data[field] is not None:
             setattr(task, field, data[field])
     
-    if 'group_id' in data: # Explizit group_id behandeln, um 'None' zu erlauben
+    if 'group_id' in data: # Explicitly handle group_id to allow 'None'
         task.group_id = data['group_id']
 
     if 'deadline' in data:
@@ -224,9 +224,19 @@ def get_tasks_for_user(user_id: str):
     if not user:
         raise Exception(f"User with id {user_id} does not exist")
 
+    # 1. Finde alle Gruppen, in denen der Benutzer Mitglied ist.
     group_ids = [m.group.id for m in user.group_memberships]
+
+    # 2. Finde alle Benutzer, die in diesen Gruppen sind.
+    member_ids_query = db.session.query(GroupMembership.user_id).filter(GroupMembership.group_id.in_(group_ids))
+    all_member_ids = [item[0] for item in member_ids_query.distinct()]
+
+    # 3. Rufe alle Aufgaben ab, die:
+    #    a) dem aktuellen Benutzer persönlich gehören (ohne Gruppe)
+    #    b) einer der Gruppen des Benutzers zugeordnet sind
+    #    c) einem anderen Mitglied einer dieser Gruppen persönlich gehören
     return Task.query.filter(
-        (Task.user_id == user_id) | (Task.group_id.in_(group_ids))
+        (Task.user_id == user_id) | (Task.group_id.in_(group_ids)) | (Task.user_id.in_(all_member_ids) & Task.group_id.isnot(None))
     ).all()
 
 
@@ -245,7 +255,7 @@ def create_group_service(data, creator_id: str):
         invite_link=data['inviteLink']
     )
     db.session.add(group)
-    # Der Ersteller wird automatisch zum Admin der Gruppe
+    # The creator automatically becomes the admin of the group
     membership = GroupMembership(user_id=creator_id, group=group, role='admin')
     db.session.add(membership)
     db.session.commit()
@@ -261,7 +271,7 @@ def join_group_service(user_id: str, group_id: int):
     if not group:
         raise Exception(f"Group with id {group_id} does not exist")
 
-    # Prüfen, ob eine Mitgliedschaft bereits existiert
+    # Check if a membership already exists
     existing_membership = db.session.query(GroupMembership).filter_by(user_id=user_id, group_id=group_id).first()
     if existing_membership:
         return group
@@ -271,6 +281,63 @@ def join_group_service(user_id: str, group_id: int):
     db.session.commit()
     return group
 
+def leave_group_service(user_id: str, group_id: int):
+    """Removes a user's membership from a group."""
+    membership = db.session.query(GroupMembership).filter_by(user_id=user_id, group_id=group_id).first()
+
+    if not membership:
+        raise Exception("User is not a member of this group.")
+
+    # If the user is the last admin, delete the entire group.
+    if membership.role == 'admin':
+        other_admins = db.session.query(GroupMembership).filter(GroupMembership.group_id == group_id, GroupMembership.role == 'admin', GroupMembership.user_id != user_id).count()
+        if other_admins == 0:
+            group_to_delete = db.session.get(Group, group_id)
+            if group_to_delete:
+                db.session.delete(group_to_delete)
+                db.session.commit()
+                return # Exit after deleting the group
+
+    db.session.delete(membership)
+    db.session.commit()
+
+def promote_to_admin_service(promoter_id: str, user_to_promote_id: str, group_id: int):
+    """Promotes a user to admin within a group, checking for promoter's admin rights."""
+    # Check if the person doing the promotion is an admin
+    promoter_membership = db.session.query(GroupMembership).filter_by(user_id=promoter_id, group_id=group_id).first()
+    if not promoter_membership or promoter_membership.role != 'admin':
+        raise PermissionError("Only admins can promote other members.")
+
+    # Find the membership of the user to be promoted
+    membership_to_update = db.session.query(GroupMembership).filter_by(user_id=user_to_promote_id, group_id=group_id).first()
+    if not membership_to_update:
+        raise Exception("User to be promoted is not a member of this group.")
+
+    # Update the role and commit
+    membership_to_update.role = 'admin'
+    db.session.commit()
+    return membership_to_update
+
+def kick_user_service(kicker_id: str, user_to_kick_id: str, group_id: int):
+    """Removes a user from a group, with admin permission checks."""
+    # Check if the person doing the kicking is an admin
+    kicker_membership = db.session.query(GroupMembership).filter_by(user_id=kicker_id, group_id=group_id).first()
+    if not kicker_membership or kicker_membership.role != 'admin':
+        raise PermissionError("Only admins can kick members.")
+
+    # Find the membership of the user to be kicked
+    membership_to_kick = db.session.query(GroupMembership).filter_by(user_id=user_to_kick_id, group_id=group_id).first()
+    if not membership_to_kick:
+        raise Exception("User to be kicked is not a member of this group.")
+
+    # Prevent an admin from kicking another admin or themselves
+    if membership_to_kick.role == 'admin':
+        raise PermissionError("Admins cannot kick other admins.")
+    if kicker_id == user_to_kick_id:
+        raise PermissionError("You cannot kick yourself. Use the 'Leave Group' feature.")
+
+    db.session.delete(membership_to_kick)
+    db.session.commit()
 
 def get_all_groups():
     return Group.query.all()
@@ -280,5 +347,5 @@ def get_groups_for_user(user_id: str):
     user = db.session.get(User, user_id)
     if not user:
         raise Exception(f"User with id {user_id} does not exist")
-    # Gibt eine Liste von Group-Objekten zurück, in denen der Benutzer Mitglied ist
+    # Returns a list of Group objects that the user is a member of
     return [membership.group for membership in user.group_memberships]

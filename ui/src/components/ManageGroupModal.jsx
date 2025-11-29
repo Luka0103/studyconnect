@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
+import { fetchWithToken } from "../api";
 
-export default function ManageGroupModal({ group, fetchWithAuth, onClose }) {
+export default function ManageGroupModal({ group, onClose }) {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -8,11 +9,9 @@ export default function ManageGroupModal({ group, fetchWithAuth, onClose }) {
     async function fetchMembers() {
       try {
         setLoading(true);
-        const res = await fetchWithAuth(
+        const data = await fetchWithToken(
           `http://localhost:5000/api/groups/${group.id}/members`
         );
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Failed to load members");
 
         setMembers(data.members || []);
       } catch (err) {
@@ -24,13 +23,13 @@ export default function ManageGroupModal({ group, fetchWithAuth, onClose }) {
     }
 
     if (group) fetchMembers();
-  }, [group, fetchWithAuth]);
+  }, [group]);
 
   const handleKick = async (memberId) => {
     if (!window.confirm("Are you sure you want to remove this user?")) return;
 
     try {
-      const res = await fetchWithAuth(
+      await fetchWithToken(
         `http://localhost:5000/api/groups/${group.id}/kick`,
         {
           method: "POST",
@@ -38,9 +37,6 @@ export default function ManageGroupModal({ group, fetchWithAuth, onClose }) {
           body: JSON.stringify({ user_id: memberId }),
         }
       );
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to remove user");
 
       // Remove user from local state to update UI
       setMembers((prev) => prev.filter((m) => m.id !== memberId));
@@ -55,7 +51,7 @@ export default function ManageGroupModal({ group, fetchWithAuth, onClose }) {
     if (!window.confirm("Promote this user to admin?")) return;
 
     try {
-      const res = await fetchWithAuth(
+      await fetchWithToken(
         `http://localhost:5000/api/groups/${group.id}/add-admin`,
         {
           method: "POST",
@@ -63,9 +59,6 @@ export default function ManageGroupModal({ group, fetchWithAuth, onClose }) {
           body: JSON.stringify({ user_id: memberId }),
         }
       );
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to promote user");
 
       // Update the role locally
       setMembers((prev) =>

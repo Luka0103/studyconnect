@@ -6,6 +6,7 @@ import CreateTask from "./create/create_task.jsx";
 import CreateGroup from "./create/create_group.jsx";
 import JoinGroup from "./create/join_group.jsx";
 import Profile from "./profile.jsx";
+import { fetchWithToken } from "./api.js";
 
 export default function App2({ token, userId, onLogout }) {
   const columnNames = {
@@ -30,102 +31,47 @@ export default function App2({ token, userId, onLogout }) {
   const [currentToken, setCurrentToken] = useState(token);
 
   // =============================
-  // Token Management & Fetch Helper
-  // =============================
-
-  const fetchWithAuth = useCallback(
-    async (url, options = {}) => {
-      const refreshToken = localStorage.getItem("refresh_token");
-      const headers = {
-        Authorization: `Bearer ${currentToken}`,
-        "X-Refresh-Token": refreshToken,
-        "Content-Type": "application/json",
-        ...(options.headers || {}),
-      };
-
-      const res = await fetch(url, { ...options, headers });
-      if (res.status !== 401) return res;
-
-      // Attempt refresh if 401 Unauthorized
-      if (!refreshToken) {
-        onLogout();
-        throw new Error("Session expired. Please log in again.");
-      }
-
-      try {
-        const refreshRes = await fetch("http://localhost:5000/api/refresh", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refresh_token: refreshToken }),
-        });
-
-        const data = await refreshRes.json();
-        if (!refreshRes.ok) throw new Error(data.error || "Failed to refresh token");
-
-        localStorage.setItem("access_token", data.access_token);
-        if (data.refresh_token) {
-          localStorage.setItem("refresh_token", data.refresh_token);
-        }
-        setCurrentToken(data.access_token);
-
-        // Retry original request
-        const retryHeaders = {
-          ...headers,
-          Authorization: `Bearer ${data.access_token}`,
-        };
-        return await fetch(url, { ...options, headers: retryHeaders });
-      } catch (err) {
-        onLogout();
-        throw new Error("Session expired. Please log in again.");
-      }
-    },
-    [currentToken, onLogout]
-  );
-
-  // =============================
   // API Calls
   // =============================
 
   const fetchTasks = useCallback(async () => {
     if (!userId) return;
     try {
-      const res = await fetchWithAuth(`http://localhost:5000/api/tasks/user/${userId}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      // Use the imported fetchWithToken which already returns JSON
+      const data = await fetchWithToken(`http://localhost:5000/api/tasks`);
 
       const newCols = { todo: [], inProgress: [], done: [], expired: [] };
       data.forEach((task) => {
-        const status =
-          task.status && newCols[task.status] ? task.status : "todo";
-        newCols[status].push({ ...task, id: String(task.id) });
+        // Normalize status from backend (e.g., 'in_progress' to 'inProgress')
+        let statusKey = task.status.replace(/_([a-z])/g, (g) => g[1].toUpperCase());
+        if (!newCols[statusKey]) {
+          statusKey = 'todo'; // Fallback to 'todo' if status is invalid
+        }
+        newCols[statusKey].push({ ...task, id: String(task.id) });
       });
       setColumns(newCols);
     } catch (err) {
       console.error("Failed to fetch tasks:", err);
       setColumns({ todo: [], inProgress: [], done: [], expired: [] });
     }
-  }, [userId, fetchWithAuth]);
+  }, [userId]);
 
   const fetchGroups = useCallback(async () => {
     if (!userId) return;
     try {
-      const res = await fetchWithAuth(`http://localhost:5000/api/groups/user/${userId}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const data = await fetchWithToken(`http://localhost:5000/api/groups/user/${userId}`);
       setGroups(data);
     } catch (err) {
       console.error("Failed to fetch groups:", err);
     }
-  }, [userId, fetchWithAuth]);
+  }, [userId]);
 
   const handleAddTask = async (newTask) => {
     try {
-      const res = await fetchWithAuth(`http://localhost:5000/api/tasks`, {
+      const data = await fetchWithToken(`http://localhost:5000/api/tasks`, {
         method: "POST",
-        body: JSON.stringify({ ...newTask, user_id: userId }),
+        body: JSON.stringify(newTask),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to create task");
 
       const task = { ...data.task, id: String(data.task.id) };
       setColumns((prev) => ({
@@ -140,15 +86,13 @@ export default function App2({ token, userId, onLogout }) {
 
   const handleUpdateTask = async (updatedTask) => {
     try {
-      const res = await fetchWithAuth(
+      const data = await fetchWithToken(
         `http://localhost:5000/api/tasks/${updatedTask.id}`,
         {
           method: "PUT",
           body: JSON.stringify(updatedTask),
         }
       );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to update task");
 
       const task = { ...data.task, id: String(data.task.id) };
       setColumns((prev) => {
@@ -167,12 +111,10 @@ export default function App2({ token, userId, onLogout }) {
 
   const handleJoinGroup = async (groupId) => {
     try {
-      const res = await fetchWithAuth(`http://localhost:5000/api/groups/join`, {
+      await fetchWithToken(`http://localhost:5000/api/groups/join`, {
         method: "POST",
         body: JSON.stringify({ user_id: userId, group_id: groupId }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to join group");
 
       fetchGroups();
       setShowForm(null);
@@ -221,7 +163,7 @@ export default function App2({ token, userId, onLogout }) {
 
     // Update backend
     try {
-      await fetchWithAuth(`http://localhost:5000/api/tasks/${draggableId}`, {
+      await fetchWithToken(`http://localhost:5000/api/tasks/${draggableId}`, {
         method: "PUT",
         body: JSON.stringify({ status: destination.droppableId }),
       });
@@ -241,7 +183,7 @@ export default function App2({ token, userId, onLogout }) {
       fetchGroups();
       setLoading(false);
     }
-  }, [userId, fetchTasks, fetchGroups]);
+  }, [userId]);
 
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -377,7 +319,6 @@ export default function App2({ token, userId, onLogout }) {
           <div className="modal-content">
             <Profile
               userId={userId}
-              fetchWithAuth={fetchWithAuth}
               onClose={() => setShowProfile(false)}
             />
           </div>
@@ -388,7 +329,6 @@ export default function App2({ token, userId, onLogout }) {
       <EditTaskModal
         task={selectedTask}
         userId={userId}
-        fetchWithAuth={fetchWithAuth}
         onSave={handleUpdateTask}
         onCancel={() => setSelectedTask(null)}
       />

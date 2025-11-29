@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
+import { fetchWithToken } from '../api.js'; 
 
-export default function EditTaskModal({ task, onSave, onCancel, userId, fetchWithToken }) {
+export default function EditTaskModal({ task, onSave, onCancel, userId }) {
   const [title, setTitle] = useState("");
   const [deadline, setDeadline] = useState("");
   const [kind, setKind] = useState("");
@@ -12,18 +13,18 @@ export default function EditTaskModal({ task, onSave, onCancel, userId, fetchWit
   const [progress, setProgress] = useState(0);
   const [groups, setGroups] = useState([]);
 
+
   useEffect(() => {
     async function fetchGroups() {
       try {
-        const res = await fetchWithToken(`http://localhost:5000/api/groups/user/${userId}`);
-        const data = await res.json();
-        if (res.ok) setGroups(data.filter(g => g.role));
+        const data = await fetchWithToken(`http://localhost:5000/api/groups/user/${userId}`);
+        setGroups(data.filter(g => g.role));
       } catch (err) {
         console.error("Failed to fetch groups:", err);
       }
     }
     if (userId) fetchGroups();
-  }, [userId]);
+  }, [userId, fetchWithToken]);
 
   useEffect(() => {
     if (task) {
