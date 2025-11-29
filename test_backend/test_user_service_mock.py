@@ -7,7 +7,7 @@ from backend.services import UserService
 class TestUserService(unittest.TestCase):
 
     def setUp(self):
-        """Wird vor jedem Test ausgeführt."""
+        """Runs before each test"""
    
         self.mock_db_session = MagicMock()
         self.mock_keycloak_admin = MagicMock()
@@ -17,7 +17,7 @@ class TestUserService(unittest.TestCase):
 
 
     def test_register_user_success(self):
-        """Testet die erfolgreiche Registrierung eines Benutzers."""
+        """Tests successful registration of user"""
       
         user_data = {
             "username": "testuser",
@@ -41,7 +41,7 @@ class TestUserService(unittest.TestCase):
 
 
     def test_register_user_fails_with_short_password(self):
-        """Testet, dass die Registrierung bei einem zu kurzen Passwort fehlschlägt."""
+        """Tests registration fails with password that is too short"""
        
         user_data = {"password": "123"}
 
@@ -56,26 +56,29 @@ class TestUserService(unittest.TestCase):
 
     @patch('backend.api.keycloak_openid') 
     def test_login_success(self, mock_keycloak_openid):
-        """Testet erfolgreichen Login."""
+        """Tests successful login"""
+        # Configure the mock to return a fake token
         expected_token = {"access_token": "a-fake-token"}
         mock_keycloak_openid.token.return_value = expected_token
 
-        token = mock_keycloak_openid.token("testuser", "correct_password")
+        # Call the method on the service
+        token = self.user_service.login("testuser", "correct_password")
 
+        # Check the result and the interaction with the mock
         self.assertEqual(token, expected_token)
         mock_keycloak_openid.token.assert_called_with("testuser", "correct_password")
 
 
     @patch('backend.api.keycloak_openid')
     def test_login_failure(self, mock_keycloak_openid):
-        """Testet fehlgeschlagenen Login."""
-        
+        """Tests failed login"""
         from keycloak.exceptions import KeycloakAuthenticationError
+        # Configure the mock to raise an exception on login
         mock_keycloak_openid.token.side_effect = KeycloakAuthenticationError("Invalid credentials")
 
-    
+        # Check that the service correctly propagates the exception
         with self.assertRaises(KeycloakAuthenticationError):
-            mock_keycloak_openid.token("testuser", "wrong_password")
+            self.user_service.login("testuser", "wrong_password")
 
 if __name__ == '__main__':
     unittest.main()
